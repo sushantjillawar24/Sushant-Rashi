@@ -131,15 +131,21 @@
   /* ── unlocking + the mute button ─────────────────────────── */
   const btn = document.getElementById("music");
   const setUi = (on) => { if (!btn) return; btn.classList.toggle("off", !on); btn.setAttribute("aria-pressed", on ? "true" : "false"); };
-  /* the pointing hand: shown (after a moment) while the sound is still off, hidden for good once it is on */
-  const hint = document.getElementById("sndHint");
-  let hintReady = false, hintDone = false;
+  /* the pointing hand: always shown for a moment, pointing at the speaker button.
+     - sound still blocked (normal on phones): "Tap for sound", until she taps
+     - sound already allowed (some desktop browsers): "Sound on · tap to mute", for a few seconds */
+  const hint = document.getElementById("sndHint"), label = hint && hint.querySelector(".snd-label");
+  let hintReady = false, hintDone = false, hintUntil = 0;
   const updateHint = () => {
-    const on = hintReady && !hintDone && !unlocked && !running();
-    if (hint) hint.classList.toggle("show", on);
+    if (!hint) return;
+    const silent = !unlocked && !running();
+    const brief = running() && performance.now() < hintUntil;
+    const on = hintReady && !hintDone && (silent || brief);
+    hint.classList.toggle("show", on);
     if (btn) btn.classList.toggle("attn", on);
+    if (label) label.textContent = running() ? "Sound on \u00B7 tap to mute" : "Tap for sound";
   };
-  setTimeout(() => { hintReady = true; updateHint(); }, 900);
+  setTimeout(() => { hintReady = true; hintUntil = performance.now() + 8000; updateHint(); setTimeout(updateHint, 8100); }, 900);
   const sync = () => { setUi(running() && !muted); updateHint(); };   // on = sound is really allowed and unmuted
   if (ctx) ctx.addEventListener("statechange", sync);
   if (btn && (hasMusic || sfxOn)) btn.hidden = false;
@@ -150,7 +156,7 @@
     try { const b = ctx.createBuffer(1, 1, 22050), s = ctx.createBufferSource(); s.buffer = b; s.connect(ctx.destination); s.start(0); } catch (_) {}   // iOS wake-up
     Promise.resolve(r).then(() => {
       if (!running()) return;
-      const first = !unlocked; unlocked = true; sync();
+      const first = !unlocked; unlocked = true; hintDone = true; sync();
       if (desired && !defs[desired].node) { current = desired; crossTo(desired, first ? { out: 1, delay: 0, fade: 1.6 } : (TRANS[desired] || { out: 2, delay: 0, fade: 2 })); }
       if (pending && performance.now() - pending.ts < 4500) { const f = pending.fn; pending = null; f(); }
       pending = null;
@@ -164,7 +170,8 @@
     for (const k in defs) if (defs[k].el) defs[k].el.muted = v;
   };
   if (btn) btn.addEventListener("click", () => {
-    if (!unlocked) { muted = false; hintDone = true; updateHint(); unlock(); return; }
+    hintDone = true; updateHint();
+    if (!unlocked) { muted = false; unlock(); return; }
     setMuted(!muted);
     if (!muted && ctx.state !== "running") ctx.resume();
   });
